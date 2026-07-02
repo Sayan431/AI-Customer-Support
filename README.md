@@ -1,6 +1,6 @@
 # 🤖 AI Customer Support Portal
 
-A production-ready backend for an AI-powered customer support system built with **FastAPI**, **Google Gemini AI**, and **PostgreSQL**.
+A full-stack AI-powered customer support system with a **FastAPI** backend, **OpenAI** integration, **PostgreSQL** database, and a **React** frontend.
 
 ## Features
 
@@ -10,21 +10,20 @@ A production-ready backend for an AI-powered customer support system built with 
 - 🎫 **Ticket Management** — Full CRUD with status, priority, category, and message threading
 - 👤 **JWT Authentication** — Access + refresh tokens, bcrypt passwords, role-based access (customer / agent / admin)
 - 📊 **Analytics Dashboard** — Ticket stats, category breakdown, daily volume, agent leaderboard, AI usage metrics
-- ⚙️ **Background Tasks** — Celery + Redis for async bulk AI processing
-- 🐳 **Docker-ready** — Full docker-compose with PostgreSQL, Redis, API, Celery worker & Flower monitor
+- 🖥️ **React Frontend** — Full UI ("Signal") covering auth, tickets, AI assistant chat, and the analytics dashboard
 
 ## Tech Stack
 
 | Layer        | Technology              |
-|--------------|-------------------------|
+|--------------|--------------------------|
 | API          | FastAPI 0.111 (Python 3.11) |
-| AI / LLM     | Google Gemini 1.5 Pro / Flash |
-| Database     | PostgreSQL 16 + SQLAlchemy 2 (async) |
-| Migrations   | Alembic                 |
-| Auth         | JWT (python-jose) + bcrypt |
-| Cache        | Redis 7                 |
-| Task Queue   | Celery 5 + Flower       |
-| Containerization | Docker + Docker Compose |
+| AI / LLM     | OpenAI (GPT-4o / GPT-4o-mini) |
+| Database     | PostgreSQL 18 + SQLAlchemy 2 (async, via asyncpg) |
+| Auth         | JWT (python-jose) + bcrypt (passlib) |
+| Frontend     | React 18 + Vite + Tailwind CSS + React Router |
+| Charts       | Recharts |
+
+> **Note:** the original project scaffolding included Celery, Redis, and Docker for background bulk-AI processing. The setup below runs the API directly with `uvicorn` against a native local PostgreSQL install — no Docker, Redis, or Celery required for core functionality (chat, tickets, summarization, auto-response, dashboard). `bulk-summarize` (`/api/v1/ai/bulk-summarize`) still depends on Celery/Redis and is not covered by this quick-start.
 
 ---
 
@@ -59,15 +58,24 @@ AI Customer Support/
 │   │   ├── chatbot.py                  # Chat request/response schemas
 │   │   └── analytics.py                # Dashboard schemas
 │   ├── services/
-│   │   ├── ai_service.py               # Gemini API calls (summarize/respond/chat)
+│   │   ├── ai_service.py               # OpenAI API calls (summarize/respond/chat)
 │   │   ├── chatbot_service.py          # Conversation management logic
 │   │   ├── ticket_service.py           # Ticket business logic
 │   │   └── summarization_service.py    # Orchestrates AI summarization
 │   └── tasks/
-│       └── celery_tasks.py             # Async background AI tasks
+│       └── celery_tasks.py             # Async background AI tasks (bulk-summarize only)
+├── frontend/                           # React + Vite + Tailwind UI ("Signal")
+│   ├── src/
+│   │   ├── lib/api.js                  # Fetch wrapper for every backend endpoint
+│   │   ├── context/AuthContext.jsx     # Session state, login/register/logout
+│   │   ├── components/                 # Shell (nav), status/priority badges
+│   │   └── pages/                      # Login, Register, TicketList, NewTicket,
+│   │                                   #   TicketDetail, Chat, Dashboard
+│   └── .env                            # VITE_API_URL, pointed at the backend
 ├── tests/
 │   ├── test_auth.py
 │   └── test_tickets.py
+├── .env                                # Backend environment variables (not committed)
 ├── .env.example                        # Environment variable template
 ├── requirements.txt
 ├── pytest.ini
@@ -77,46 +85,65 @@ AI Customer Support/
 
 ---
 
-## Quick Start
+## Quick Start (local, no Docker)
 
-### Option A — Docker (Recommended)
-
-```bash
-# 1. Copy env file and add your Gemini API key
-copy .env.example .env
-# Edit .env: set GEMINI_API_KEY=your-key-here
-
-# 2. Start all services
-docker-compose up --build
-
-# API:    http://localhost:8000/docs
-# Flower: http://localhost:5555
-```
-
-### Option B — Local Development
+### 1. Backend
 
 ```bash
-# 1. Create and activate virtual environment
+# From the project root
 python -m venv venv
 venv\Scripts\activate        # Windows
 # source venv/bin/activate   # Linux/Mac
 
-# 2. Install dependencies
 pip install -r requirements.txt
-
-# 3. Set up environment
-copy .env.example .env
-# Edit .env with your database URL and Gemini API key
-
-# 4. Start PostgreSQL and Redis (via Docker or locally)
-docker-compose up postgres redis -d
-
-# 5. Run database migrations
-alembic upgrade head
-
-# 6. Start the API server
-uvicorn app.main:app --reload --port 8000
 ```
+
+Install and start PostgreSQL locally (see below), then create the database:
+
+```bash
+psql -U postgres
+CREATE DATABASE ai_support_db;
+\q
+```
+
+Copy `.env.example` to `.env` and fill in:
+
+```
+SECRET_KEY=some-long-random-string
+DATABASE_URL=postgresql+asyncpg://postgres:YOUR_PASSWORD@localhost:5432/ai_support_db
+ALLOWED_ORIGINS=["http://localhost:5173"]
+
+OPENAI_API_KEY=your-openai-key-here
+OPENAI_MODEL=gpt-4o
+OPENAI_FLASH_MODEL=gpt-4o-mini
+```
+
+Run the API (excluding `venv/` from the reload watcher keeps logs clean):
+
+```bash
+uvicorn app.main:app --reload --reload-dir app
+```
+
+Tables are created automatically on startup — no manual migration step needed for local dev. API docs: **http://localhost:8000/docs**
+
+### 2. Frontend
+
+```bash
+cd frontend
+npm install
+```
+
+Create `frontend/.env`:
+
+```
+VITE_API_URL=http://localhost:8000/api/v1
+```
+
+```bash
+npm run dev
+```
+
+Runs at **http://localhost:5173**.
 
 ---
 
@@ -139,7 +166,7 @@ uvicorn app.main:app --reload --port 8000
 | `POST` | `/api/v1/tickets/{id}/assign` | 🔒 Agent | Assign ticket to agent |
 | `POST` | `/api/v1/ai/summarize` | ✅ | Summarize ticket with AI |
 | `POST` | `/api/v1/ai/auto-response` | 🔒 Agent | Generate AI response |
-| `POST` | `/api/v1/ai/bulk-summarize` | 🔒 Agent | Bulk summarize (async) |
+| `POST` | `/api/v1/ai/bulk-summarize` | 🔒 Agent | Bulk summarize (async, requires Celery/Redis) |
 | `GET`  | `/api/v1/analytics/dashboard` | 🔒 Agent | Dashboard metrics |
 | `GET`  | `/health` | — | Health check |
 
@@ -157,13 +184,31 @@ pytest tests/ -v
 
 ## Environment Variables
 
+### Backend (`.env`)
+
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `SECRET_KEY` | JWT signing secret (32+ chars) | *required* |
-| `DATABASE_URL` | PostgreSQL async URL | `postgresql+asyncpg://...` |
-| `REDIS_URL` | Redis connection URL | `redis://localhost:6379/0` |
-| `GEMINI_API_KEY` | Google Gemini API key | *required* |
-| `GEMINI_MODEL` | Pro model for complex tasks | `gemini-1.5-pro` |
-| `GEMINI_FLASH_MODEL` | Flash model for quick tasks | `gemini-1.5-flash` |
+| `DATABASE_URL` | PostgreSQL async URL (must use `+asyncpg`) | *required* |
+| `ALLOWED_ORIGINS` | JSON array of allowed CORS origins, e.g. `["http://localhost:5173"]` | `["http://localhost:3000"]` |
+| `OPENAI_API_KEY` | OpenAI API key | *required* |
+| `OPENAI_MODEL` | Model for complex tasks (auto-response, chat) | `gpt-4o` |
+| `OPENAI_FLASH_MODEL` | Model for quick tasks (summarize, classify) | `gpt-4o-mini` |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | JWT access token TTL | `60` |
-| `ALLOWED_ORIGINS` | Comma-separated CORS origins | `http://localhost:3000` |
+| `REDIS_URL` | Redis connection URL — only needed for `/ai/bulk-summarize` | `redis://localhost:6379/0` |
+
+`ALLOWED_ORIGINS` and any other list-typed setting must be valid JSON (e.g. `["a","b"]`), not a bare comma-separated string.
+
+### Frontend (`frontend/.env`)
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `VITE_API_URL` | Base URL of the backend API | `http://localhost:8000/api/v1` |
+
+---
+
+## Deployment
+
+- **Backend + PostgreSQL:** [Render](https://render.com) — free web service + free managed Postgres instance. Set the start command to `uvicorn app.main:app --host 0.0.0.0 --port $PORT` and add all backend env vars above (with `DATABASE_URL` pointed at Render's Postgres, using `+asyncpg`).
+- **Frontend:** [Vercel](https://vercel.com) — import the `frontend/` folder as the project root, set `VITE_API_URL` to the deployed Render backend URL.
+- After deploying, update `ALLOWED_ORIGINS` on the backend to include the live frontend URL.
